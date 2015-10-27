@@ -23,12 +23,22 @@ AVCodec*         m_pVideoCodec = NULL;
 AVFrame*         m_pAVFrame = NULL;
 AVFrame*         m_pThumbFrame = NULL;
 
-const char strInputFileName[] = "D:\\testcontent\\MP4_H.264_BP_L2.1_480x270_500Kbps_23.959fps_AAC_LC.mp4";
+const char* strInputFileName[] = {
+    "D:\\testcontent\\MP4_H.264_Base_L4.0_1080P_7Mbps_25fps_AAC_LC.mp4",
+    "D:\\testcontent\\MP4_H.264_BP_L1.3_480P_1.1Mbps_29.970fps_AMR_NB.mp4",
+    "D:\\testcontent\\MP4_H.264_BP_L2.1_480x270_500Kbps_23.959fps_AAC_LC.mp4",
+    "D:\\testcontent\\MP4_H.264_BP_L2.1_512x288_1.2Mbps_15fps_AAC_LC.mp4",
+    "D:\\testcontent\\MP4_H.264_BP_L4.1_CIF_2Mbps_25fps_AAC_LC.mp4",
+    "D:\\testcontent\\MP4_H.264_MP_L4.0_1080P_762Kbps_30fps_AAC_LC.mp4",
+    "D:\\testcontent\\MP4_H.264_MP_L3.1_720P_2Mbps_30fps_AAC_LC.mp4",
+    "D:\\testcontent\\MP4_H.264_MP_L2.2_640x320_463Kbps_25fps_AAC_LC.mp4",
+    "D:\\testcontent\\MP4_H.264_MP_L3.1_720P_1Mbps_29.585fps_AAC_LC.mp4"
+};
 const char strThumbFileName[] = "D:\\test_thumb.rgb";
 #define THUMB_WIDTH   640
 #define THUMB_HEIGHT  480
 #define BRIGHTNESS_VALUE 0xF0
-#define DARKNESS_VALUE   0xF
+#define DARKNESS_VALUE   16
 
 int initFFmpegContext()
 {
@@ -44,7 +54,7 @@ int setDataSource(const char* url)
     int ret = -1;
     if (m_pFormatContext)
     {
-        delete m_pFormatContext;
+        avformat_free_context(m_pFormatContext);
         m_pFormatContext = NULL;
     }
 
@@ -90,11 +100,21 @@ int openDecoder()
     return ret;
 }
 
+void closeDecoder()
+{
+    if (m_pVideoCodec)
+    {
+        avcodec_close(m_pCodecContext);
+        m_pCodecContext = NULL;
+    }
+}
+
 int decodeOneFrame(AVFrame* pFrame)
 {
     int ret = 0;
 
     bool frame_found = false;
+    int  decoded_frame_count = 0;
     AVPacket pkt;
     do
     {
@@ -109,18 +129,31 @@ int decodeOneFrame(AVFrame* pFrame)
             ret = avcodec_decode_video2(m_pCodecContext, pFrame, &got_frame, &pkt);
             if (got_frame)
             {
+                decoded_frame_count++;
                 //skip black and white pitures
-                int y_value = 0;
+                uint32_t y_value = 0;
+                uint32_t y_half = 0;
                 int pixel_count = pFrame->width * pFrame->height;
                 for (int i = 0; i < pixel_count; i++)
                 {
-                    y_value += (int)(*(int8_t*)(pFrame->data[0] + i));
+                    uint8_t y_temp = (uint8_t)(*(uint8_t*)((uint8_t*)(pFrame->data[0]) + i));
+                    y_value += y_temp;
+                    if (i == (pixel_count / 2))
+                    {
+                        y_half = y_value / i;
+                    }
                 }
 
                 y_value /= pixel_count;
+                if (y_half == y_value)
+                {
+                    printf("decoded frame count = %d y_half=%d == y_value=%d, skip this frame!\n", decoded_frame_count, y_half, y_value);
+                    continue;
+                }
                 if (y_value < BRIGHTNESS_VALUE && y_value > DARKNESS_VALUE)
                 {
                     frame_found = true;
+                    printf("frame_found = true -----------------------decoded frame count = %d\n", decoded_frame_count);
                 }
             }
 #ifdef SAVE_YUV_FRAME    
@@ -189,18 +222,23 @@ int getFrameAt(int64_t timeUs, int width, int height)
     {
         av_frame_free(&pFrame);
         av_frame_free(&m_pThumbFrame);
+        return ret;
     }
+
     ret = decodeOneFrame(pFrame);
     if (ret < 0)
     {
         av_frame_free(&pFrame);
         av_frame_free(&m_pThumbFrame);
-    }
+        return ret;
+    }    
+
     ret = getThumbnail(pFrame, m_pThumbFrame, width, height);
     if (ret < 0)
     {
         av_frame_free(&pFrame);
         av_frame_free(&m_pThumbFrame);
+        return ret;
     }
 
     // save the rgb565
@@ -214,6 +252,8 @@ int getFrameAt(int64_t timeUs, int width, int height)
     av_frame_free(&pFrame);
     av_frame_free(&m_pThumbFrame);
 
+    closeDecoder();    
+
     return ret;
 }
 
@@ -224,9 +264,18 @@ int _tmain(int argc, _TCHAR* argv[])
     int ret = -1;
     initFFmpegContext();
 
-    ret = setDataSource(strInputFileName);
+    int file_count = sizeof(strInputFileName) / sizeof(strInputFileName[0]);
+    for (int i = 0; i < file_count; i++)
+    {
+        const char* pFileName = strInputFileName[i];
+        ret = setDataSource(pFileName);
 
-    getFrameAt(-1, THUMB_WIDTH, THUMB_HEIGHT);
+        getFrameAt(-1, THUMB_WIDTH, THUMB_HEIGHT);
+    }
+
+    //pause
+    printf("finished, pause ....\n");
+    getchar();
 
     return 0;
 }
