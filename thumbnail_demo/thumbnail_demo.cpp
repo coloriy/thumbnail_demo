@@ -15,6 +15,16 @@ extern "C"
 #include "libavformat\avformat.h"
 #include "libswscale\swscale.h"
 }
+#define DEBUG_SPEND_TIME 1
+#ifdef DEBUG_SPEND_TIME
+#ifdef _WIN32
+#include "windows.h"
+#include "mmsystem.h"
+#pragma comment(lib, "winmm.lib")
+#else
+#include <sys/time.h>
+#endif
+#endif
 
 AVFormatContext* m_pFormatContext = NULL;
 AVCodecContext*  m_pCodecContext = NULL;
@@ -38,7 +48,7 @@ const char strThumbFileName[] = "D:\\test_thumb.rgb";
 #define THUMB_WIDTH   640
 #define THUMB_HEIGHT  480
 #define BRIGHTNESS_VALUE 0xF0
-#define DARKNESS_VALUE   16
+#define DARKNESS_VALUE   0x10
 
 int initFFmpegContext()
 {
@@ -133,18 +143,23 @@ int decodeOneFrame(AVFrame* pFrame)
                 //skip black and white pitures
                 uint32_t y_value = 0;
                 uint32_t y_half = 0;
+                uint32_t y_count = 0;
                 int pixel_count = pFrame->width * pFrame->height;
-                for (int i = 0; i < pixel_count; i++)
+                bool bHalf = false;
+                for (int i = 0; i < pixel_count; i+=3)
                 {
                     uint8_t y_temp = (uint8_t)(*(uint8_t*)((uint8_t*)(pFrame->data[0]) + i));
                     y_value += y_temp;
-                    if (i == (pixel_count / 2))
+                    y_count++;
+
+                    if (!bHalf && i > pixel_count / 6)
                     {
-                        y_half = y_value / i;
+                        y_half = y_value / y_count;
+                        bHalf = true;
                     }
                 }
 
-                y_value /= pixel_count;
+                y_value /= y_count;
                 if (y_half == y_value)
                 {
                     printf("decoded frame count = %d y_half=%d == y_value=%d, skip this frame!\n", decoded_frame_count, y_half, y_value);
@@ -224,6 +239,14 @@ int getFrameAt(int64_t timeUs, int width, int height)
         av_frame_free(&m_pThumbFrame);
         return ret;
     }
+#ifdef DEBUG_SPEND_TIME
+#ifdef _WIN32
+    DWORD start_time = timeGetTime();
+#else
+    struct timeval start, end;
+    gettimeofday(&start, NULL);
+#endif
+#endif
 
     ret = decodeOneFrame(pFrame);
     if (ret < 0)
@@ -231,7 +254,17 @@ int getFrameAt(int64_t timeUs, int width, int height)
         av_frame_free(&pFrame);
         av_frame_free(&m_pThumbFrame);
         return ret;
-    }    
+    }
+#ifdef DEBUG_SPEND_TIME
+#ifdef _WIN32
+    DWORD end_time = timeGetTime();
+    printf("decodeOneFrame spend time = %d ms\n", end_time - start_time);
+#else
+    gettimeofday(&end, NULL);
+    int spend_time = (end.tv_sec - start.tv_sec) * 1000 + (end.tv_usec - start.tv_usec) / 1000;
+    printf("spend_time = %d ms\n", spend_time);
+#endif
+#endif
 
     ret = getThumbnail(pFrame, m_pThumbFrame, width, height);
     if (ret < 0)
