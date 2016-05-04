@@ -48,7 +48,7 @@ const char strThumbFileName[] = "D:\\test_thumb.rgb";
 #define THUMB_WIDTH   640
 #define THUMB_HEIGHT  480
 #define BRIGHTNESS_VALUE 0xF0
-#define DARKNESS_VALUE   0x10
+#define DARKNESS_VALUE   0x30
 
 int initFFmpegContext()
 {
@@ -134,11 +134,24 @@ int decodeOneFrame(AVFrame* pFrame)
         {
             break;
         }
+        if (pkt.flags != AV_PKT_FLAG_KEY)
+        {
+            av_free_packet(&pkt);
+            continue;
+        }
         if (pkt.stream_index == m_nStreamIndex[AVMEDIA_TYPE_VIDEO])
         {
             ret = avcodec_decode_video2(m_pCodecContext, pFrame, &got_frame, &pkt);
-            if (got_frame)
+            if (got_frame && ret >=0)
             {
+                if (pFrame->width != m_pCodecContext->width || pFrame->height != m_pCodecContext->height)
+                {
+                    m_pCodecContext->width = pFrame->width;
+                    m_pCodecContext->height = pFrame->height;
+                    decoded_frame_count++;
+                    av_free_packet(&pkt);
+                    continue;
+                }
                 decoded_frame_count++;
                 //skip black and white pitures
                 uint32_t y_value = 0;
